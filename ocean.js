@@ -1,4 +1,4 @@
-(() => {
+ (() => {
       "use strict";
 
       const CONFIG = Object.freeze({
@@ -917,7 +917,7 @@
           tableState.hidden = false;
           tableState.textContent = appState.search
             ? "Nenhum membro corresponde à busca."
-            : "Nenhum registro foi encontrado em V:AE ou A:J.";
+            : "Nenhum registro foi encontrado.";
         } else {
           tableState.hidden = true;
           table.hidden = false;
@@ -1045,7 +1045,7 @@
               rows.length === 1 ? "" : "s"
             } organizado${rows.length === 1 ? "" : "s"} e atualizado${
               rows.length === 1 ? "" : "s"
-            } em A:J.`,
+            }.`,
             "success"
           );
         } catch (error) {
@@ -1100,7 +1100,7 @@
           showToast(
             `${formatCount(changedRows.length)} registro${
               changedRows.length === 1 ? "" : "s"
-            } salvo${changedRows.length === 1 ? "" : "s"} com segurança em A:J.`,
+            } salvo${changedRows.length === 1 ? "" : "s"} com segurança.`,
             "success"
           );
         } catch (error) {
@@ -1315,13 +1315,13 @@
           updateSummary();
           updateDataTimestamp();
           setWorkspaceState("ready", "Sincronizado");
-          showToast("Novo membro adicionado com segurança em A:J.", "success");
+          showToast("Novo membro adicionado com segurança.", "success");
         } catch (error) {
           showToast(error.message, "error");
         } finally {
           appState.savingMembers = false;
           button.disabled = false;
-          button.textContent = "Adicionar em A:J";
+          button.textContent = "Adicionar membro";
           updateMemberEditControls();
         }
       }
@@ -1413,7 +1413,7 @@
         if (!roles.length) {
           const empty = document.createElement("p");
           empty.className = "role-list__empty";
-          empty.textContent = "Nenhum cargo preenchido em N:O.";
+          empty.textContent = "Nenhum cargo configurado.";
           list.appendChild(empty);
         } else {
           roles.forEach((item) => {
@@ -1553,7 +1553,7 @@
         const paletteMeta = document.createElement("span");
         paletteMeta.className = "layout-resource__meta";
         paletteMeta.textContent = colors.length
-          ? `${formatCount(colors.length)} cor${colors.length === 1 ? "" : "es"} em M:M`
+          ? `${formatCount(colors.length)} cor${colors.length === 1 ? "" : "es"} configurada${colors.length === 1 ? "" : "s"}`
           : "A paleta será usada na futura composição do BBCode";
         paletteCard.append(paletteLabel, palette, paletteMeta);
 
@@ -1579,7 +1579,7 @@
             : "Sem links",
           links.length
             ? links.map(displayHostname).join(" · ")
-            : "Espaços disponíveis em S:T"
+            : "Nenhum link configurado"
         );
 
         container.append(bannerCard, paletteCard, topicsCard, linksCard);
@@ -1723,7 +1723,7 @@
       function openPublishingDialog() {
         if (!hasPublishingData()) {
           showToast(
-            "Preencha P2:R2 e AG2:AH2 e publique a versão atualizada da API.",
+            "Configure os tópicos e os conteúdos de publicação antes de continuar.",
             "warning"
           );
           return;
@@ -2023,7 +2023,7 @@
             bridgeAction: "edit",
             topicId: requireTopicId(
               publishing.listingTopicId,
-              "P2"
+              "O tópico da listagem"
             ),
             bbcode: publishingText("listing")
           },
@@ -2033,7 +2033,7 @@
             bridgeAction: "edit",
             topicId: requireTopicId(
               publishing.consultationTopicId,
-              "Q2"
+              "O tópico da consulta"
             ),
             bbcode: publishingText("consultation")
           },
@@ -2041,7 +2041,10 @@
             kind: "backup",
             label: "Publicação do backup",
             bridgeAction: "reply",
-            topicId: requireTopicId(publishing.backupTopicId, "R2"),
+            topicId: requireTopicId(
+              publishing.backupTopicId,
+              "O tópico de backup"
+            ),
             bbcode: publishingText("backup")
           }
         };
@@ -2068,53 +2071,36 @@
         return { sameForumOrigin, popup };
       }
 
-      function normalizeForumResultUrl(value, topicId) {
-        try {
-          const resultUrl = new URL(
-            value || forumTopicUrl(topicId),
-            CONFIG.forum.origin
-          );
-          if (resultUrl.origin === CONFIG.forum.origin) {
-            return resultUrl.toString();
-          }
-        } catch {
-          // Usa a URL segura do tópico como fallback.
-        }
-
-        return forumTopicUrl(topicId);
-      }
-
       async function executeAutomaticPublishingAction(action, transport) {
         document.getElementById("publish-status").textContent =
           `${action.label}: enviando…`;
         setPublishingResult(action.kind, "running", "Enviando…", "");
 
         try {
-          let resultUrl;
           if (transport.sameForumOrigin) {
-            resultUrl =
-              action.bridgeAction === "edit"
-                ? await editForumTopic(action.topicId, action.bbcode)
-                : await replyForumTopic(action.topicId, action.bbcode);
+            if (action.bridgeAction === "edit") {
+              await editForumTopic(action.topicId, action.bbcode);
+            } else {
+              await replyForumTopic(action.topicId, action.bbcode);
+            }
           } else {
-            const result = await publishThroughForumBridge(transport.popup, {
+            await publishThroughForumBridge(transport.popup, {
               type: "OCEANLIST_FORUM_ACTION",
               requestId: createPublishingRequestId(),
               action: action.bridgeAction,
               topicId: action.topicId,
               bbcode: action.bbcode
             });
-            resultUrl = result.url;
           }
 
-          const safeUrl = normalizeForumResultUrl(resultUrl, action.topicId);
+          const topicUrl = forumTopicUrl(action.topicId);
           setPublishingResult(
             action.kind,
             "success",
             "Concluído",
-            safeUrl
+            topicUrl
           );
-          return safeUrl;
+          return topicUrl;
         } catch (error) {
           setPublishingResult(
             action.kind,
@@ -2372,7 +2358,7 @@
           renderSettings();
           updateSummary();
           updateDataTimestamp();
-          showToast("Cargo e vagas atualizados em N:O.", "success");
+          showToast("Cargo e vagas atualizados.", "success");
         } catch (error) {
           showToast(error.message, "error");
         } finally {
@@ -2428,7 +2414,7 @@
 
         const colorGroup = createEditorFieldset(
           "Paleta de cores",
-          "Cores independentes dos cargos, armazenadas verticalmente em M:M."
+          "Cores independentes dos cargos usadas na composição do BBCode."
         );
         appState.settings.forEach((item, index) => {
           colorGroup.grid.appendChild(
@@ -2442,9 +2428,9 @@
 
         const topicsGroup = createEditorFieldset(
           "Tópicos de publicação",
-          "IDs numéricos da listagem, consulta e backup armazenados em P2:R2."
+          "Informe os IDs numéricos dos tópicos usados na publicação."
         );
-        ["Listagem · P2", "Consulta · Q2", "Backup · R2"].forEach(
+        ["Listagem", "Consulta", "Backup"].forEach(
           (label, index) => {
             topicsGroup.grid.appendChild(
               createFormField(
@@ -2463,7 +2449,7 @@
 
         const linksGroup = createEditorFieldset(
           "Links importantes",
-          "Dois espaços em S:T reservados para links usados no BBCode."
+          "Links complementares usados na composição do BBCode."
         );
         Array.from({ length: 2 }, (_, index) => {
           linksGroup.grid.appendChild(
@@ -2586,7 +2572,7 @@
           closeLayoutEditor();
           renderSettings();
           updateDataTimestamp();
-          showToast("Recursos do BBCode atualizados em L:M e P:T.", "success");
+          showToast("Recursos do BBCode atualizados.", "success");
         } catch (error) {
           showToast(error.message, "error");
         } finally {
