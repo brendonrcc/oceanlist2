@@ -1,4 +1,4 @@
- (() => {
+(() => {
       "use strict";
 
       const CONFIG = Object.freeze({
@@ -969,17 +969,40 @@
         confirmRemoveButton.disabled =
           appState.savingMembers || !appState.selectedMemberRows.size;
         cancelRemoveButton.disabled = appState.savingMembers;
-        organizeButton.textContent = appState.organizingMembers
-          ? "Organizando…"
+        const organizeLabel = appState.organizingMembers
+          ? "Organizando lista"
           : "Organizar lista";
-        saveButton.textContent = appState.savingMembers
-          ? "Salvando…"
+        organizeButton.setAttribute("aria-label", organizeLabel);
+        organizeButton.title = organizeLabel;
+        organizeButton.classList.toggle(
+          "is-loading",
+          appState.organizingMembers
+        );
+
+        const saveLabel = appState.savingMembers
+          ? "Salvando alterações"
           : "Salvar alterações";
-        confirmRemoveButton.textContent = appState.savingMembers
-          ? "Removendo…"
-          : appState.selectedMemberRows.size
-            ? `Remover ${formatCount(appState.selectedMemberRows.size)}`
+        saveButton.setAttribute("aria-label", saveLabel);
+        saveButton.title = saveLabel;
+        saveButton.classList.toggle(
+          "is-loading",
+          appState.savingMembers && isEditing
+        );
+
+        const removeCount = appState.selectedMemberRows.size;
+        const confirmRemoveLabel = appState.savingMembers
+          ? "Removendo membros"
+          : removeCount
+            ? `Remover ${formatCount(removeCount)} selecionado${
+                removeCount === 1 ? "" : "s"
+              }`
             : "Remover selecionados";
+        confirmRemoveButton.setAttribute("aria-label", confirmRemoveLabel);
+        confirmRemoveButton.title = confirmRemoveLabel;
+        confirmRemoveButton.classList.toggle(
+          "is-loading",
+          appState.savingMembers && isRemoving
+        );
 
         document.getElementById("refresh-members").disabled =
           isBusy || isEditing || isRemoving;
