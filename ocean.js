@@ -2414,6 +2414,138 @@
         return (trimmed.startsWith("#") ? trimmed : `#${trimmed}`).toUpperCase();
       }
 
+      function validPreviewHexColor(value) {
+        return /^#(?:[0-9A-F]{3}|[0-9A-F]{4}|[0-9A-F]{6}|[0-9A-F]{8})$/i.test(
+          value
+        );
+      }
+
+      function updateLayoutBannerPreview() {
+        const input = document.getElementById("layout-banner");
+        const image = document.getElementById("layout-preview-banner");
+        const placeholder = document.getElementById(
+          "layout-preview-banner-placeholder"
+        );
+        if (!input || !image || !placeholder) return;
+
+        const value = input.value.trim();
+        image.hidden = true;
+        placeholder.hidden = false;
+
+        if (!value) {
+          image.removeAttribute("src");
+          image.dataset.previewSource = "";
+          placeholder.textContent =
+            "Adicione o link do banner para visualizá-lo.";
+          return;
+        }
+
+        let source;
+        try {
+          const parsed = new URL(value);
+          if (!["http:", "https:"].includes(parsed.protocol)) {
+            throw new Error("Protocolo inválido");
+          }
+          source = parsed.toString();
+        } catch {
+          image.removeAttribute("src");
+          image.dataset.previewSource = "";
+          placeholder.textContent = "Insira um link válido para o banner.";
+          return;
+        }
+
+        placeholder.textContent = "Carregando banner…";
+        image.dataset.previewSource = source;
+        image.onload = () => {
+          if (image.dataset.previewSource !== source) return;
+          image.hidden = false;
+          placeholder.hidden = true;
+        };
+        image.onerror = () => {
+          if (image.dataset.previewSource !== source) return;
+          image.hidden = true;
+          placeholder.hidden = false;
+          placeholder.textContent = "Não foi possível carregar este banner.";
+        };
+
+        if (image.src !== source) {
+          image.src = source;
+        } else if (image.complete) {
+          if (image.naturalWidth) {
+            image.hidden = false;
+            placeholder.hidden = true;
+          } else {
+            placeholder.textContent = "Não foi possível carregar este banner.";
+          }
+        }
+      }
+
+      function updateLayoutColorPreview() {
+        const canvas = document.getElementById("layout-preview-canvas");
+        const palette = document.getElementById("layout-preview-palette");
+        if (!canvas || !palette) return;
+
+        const entries = Array.from(
+          document.querySelectorAll("[data-layout-color-row]")
+        ).map((input, index) => {
+          const value = normalizeHexColor(input.value);
+          return {
+            index,
+            value,
+            valid: Boolean(value) && validPreviewHexColor(value)
+          };
+        });
+        const colors = entries
+          .filter((entry) => entry.valid)
+          .map((entry) => entry.value);
+
+        canvas.style.setProperty(
+          "--preview-color-1",
+          colors[0] || "var(--text)"
+        );
+        canvas.style.setProperty(
+          "--preview-color-2",
+          colors[1] || colors[0] || "var(--accent)"
+        );
+        canvas.style.setProperty(
+          "--preview-color-3",
+          colors[2] || colors[1] || colors[0] || "var(--accent-soft)"
+        );
+
+        palette.replaceChildren();
+        entries.forEach((entry) => {
+          const item = document.createElement("div");
+          item.className = `bbcode-preview-color${
+            entry.value && !entry.valid ? " is-invalid" : ""
+          }`;
+
+          const swatch = document.createElement("span");
+          swatch.className = "bbcode-preview-color__swatch";
+          if (entry.valid) {
+            swatch.style.setProperty("--preview-swatch", entry.value);
+          }
+
+          const copy = document.createElement("span");
+          copy.className = "bbcode-preview-color__copy";
+          const label = document.createElement("strong");
+          label.textContent = `Cor ${entry.index + 1}`;
+          const value = document.createElement("small");
+          value.textContent = entry.valid
+            ? entry.value
+            : entry.value
+              ? "Cor inválida"
+              : "Não definida";
+          copy.append(label, value);
+          item.append(swatch, copy);
+          palette.appendChild(item);
+        });
+      }
+
+      function updateLayoutLivePreview() {
+        updateLayoutBannerPreview();
+        updateLayoutColorPreview();
+      }
+
       function openLayoutEditor() {
         const owner = getLayoutOwner();
         if (!owner) return;
@@ -2496,6 +2628,15 @@
           topicsGroup.section,
           linksGroup.section
         );
+        document
+          .getElementById("layout-banner")
+          .addEventListener("input", updateLayoutBannerPreview);
+        fields
+          .querySelectorAll("[data-layout-color-row]")
+          .forEach((input) =>
+            input.addEventListener("input", updateLayoutColorPreview)
+          );
+        updateLayoutLivePreview();
         document.getElementById("layout-editor").showModal();
       }
 
