@@ -1765,7 +1765,23 @@
         );
       }
 
-      async function submitForumPostingForm(formUrl, bbcode) {
+      function applyForumSubmissionOptions(body, form, options = {}) {
+        if (options.clearEditReason) {
+          body.delete("edit_reason");
+        }
+
+        if (options.disableHtml) {
+          const disableHtmlControl = form.querySelector(
+            'input[name="disable_html"]'
+          );
+          body.set(
+            disableHtmlControl?.name || "disable_html",
+            disableHtmlControl?.value || "1"
+          );
+        }
+      }
+
+      async function submitForumPostingForm(formUrl, bbcode, options = {}) {
         const page = await fetchForumDocument(formUrl);
         const form = findForumPostingForm(page.document);
         if (!form) {
@@ -1781,6 +1797,7 @@
         body.set(textarea.name || "message", bbcode);
         body.delete("preview");
         body.set("post", "Enviar");
+        applyForumSubmissionOptions(body, form, options);
 
         const action = new URL(
           form.getAttribute("action") || "/post",
@@ -1832,7 +1849,8 @@
 
         return submitForumPostingForm(
           new URL(editLink.getAttribute("href"), CONFIG.forum.origin),
-          bbcode
+          bbcode,
+          { clearEditReason: true }
         );
       }
 
@@ -1840,7 +1858,9 @@
         const replyUrl = new URL("/post", CONFIG.forum.origin);
         replyUrl.searchParams.set("t", topicId);
         replyUrl.searchParams.set("mode", "reply");
-        return submitForumPostingForm(replyUrl, bbcode);
+        return submitForumPostingForm(replyUrl, bbcode, {
+          disableHtml: true
+        });
       }
 
       function waitForPublishingDelay(label) {
