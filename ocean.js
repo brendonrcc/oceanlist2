@@ -4,16 +4,8 @@
       const CONFIG = Object.freeze({
         workerProxy: "https://proxyefe.brendonadsrcc.workers.dev/",
         cacheDurationMs: 5 * 60 * 1000,
-        auth: Object.freeze({
-          temporaryUser: Object.freeze({
-            nick: ".Brendon",
-            role: "Desenvolvedor"
-          })
-        }),
         sheets: Object.freeze({
-          oceanListApi: "https://script.google.com/macros/s/AKfycbylz0He8rir-m2iF4lBrhoWXve5qrxPt9rTc19lBVhdp58UmeWdPZDssQCXjfgTt4c53w/exec",
-          membersId: "1Y09nybDM7GdOMpO03QZyoh0UP1-Or0CYyV_shKh84Oc",
-          membersGid: "1532718941"
+          oceanListApi: "https://script.google.com/macros/s/AKfycbylz0He8rir-m2iF4lBrhoWXve5qrxPt9rTc19lBVhdp58UmeWdPZDssQCXjfgTt4c53w/exec"
         }),
         forum: Object.freeze({
           origin: "https://brendonrcc.forumeiros.com",
@@ -99,13 +91,6 @@
         return url.toString();
       }
 
-      function spreadsheetExportUrl(id, gid, format = "tsv") {
-        const url = new URL(`https://docs.google.com/spreadsheets/d/${id}/export`);
-        url.searchParams.set("gid", gid);
-        url.searchParams.set("format", format);
-        return url.toString();
-      }
-
       async function fetchViaWorker(targetUrl, options = {}) {
         const {
           forceRefresh = false,
@@ -165,6 +150,11 @@
 
       async function requestOceanList(action, payload = null) {
         const target = new URL(CONFIG.sheets.oceanListApi);
+        const requestedUsername = cleanCell(
+          (payload && payload.username) ||
+            (currentUser && currentUser.nick) ||
+            ""
+        );
         const isWrite =
           action.startsWith("save") ||
           action === "removeData" ||
@@ -179,9 +169,16 @@
 
         if (isWrite) {
           request.headers = { "Content-Type": "text/plain;charset=utf-8" };
-          request.body = JSON.stringify({ action, ...(payload || {}) });
+          request.body = JSON.stringify({
+            action,
+            ...(payload || {}),
+            username: requestedUsername
+          });
         } else {
           target.searchParams.set("action", action);
+          if (requestedUsername) {
+            target.searchParams.set("username", requestedUsername);
+          }
         }
 
         try {
@@ -2598,36 +2595,8 @@
         }
       }
 
-      function parseTSV(text) {
-        return text
-          .replace(/\r/g, "")
-          .split("\n")
-          .filter((line) => line.trim())
-          .map((line) => line.split("\t").map((cell) => cell.trim()));
-      }
-
       function cleanCell(value) {
         return String(value || "").replace(/^"|"$/g, "").trim();
-      }
-
-      function normalizeNick(value) {
-        return cleanCell(value).toLocaleLowerCase("pt-BR");
-      }
-
-      function findMember(username, source) {
-        const target = normalizeNick(username);
-        const rows = parseTSV(source);
-
-        for (const row of rows) {
-          if (row.length < 2) continue;
-          const role = cleanCell(row[0]);
-          const nick = cleanCell(row[1]);
-          if (nick && normalizeNick(nick) === target) {
-            return { nick, role: role || "Membro" };
-          }
-        }
-
-        return null;
       }
 
       async function fetchForumUsername() {
@@ -2690,30 +2659,34 @@
       }
 
       async function initializeAuthentication() {
+        const authScreen = document.getElementById("auth-screen");
+        authScreen.hidden = false;
+        authScreen.classList.remove("is-hidden", "is-denied");
+        authScreen.setAttribute("role", "status");
+        document.getElementById("auth-title").textContent = "Verificando acesso";
+        document.getElementById("auth-message").textContent =
+          "Aguarde enquanto validamos seu login e sua permissão na OceanList.";
+
         try {
-          if (CONFIG.auth.temporaryUser) {
-            allowAccess(CONFIG.auth.temporaryUser);
-            showToast(
-              "",
-              "success",
-              `Bem-vindo, ${CONFIG.auth.temporaryUser.nick}`
-            );
-            await loadOceanList({ quiet: true });
-            return;
-          }
-
           const username = await fetchForumUsername();
-          const membersSource = await fetchMembers();
-          const member = findMember(username, membersSource);
+          const response = await requestOceanList("access", { username });
+          const access = response.access || {};
 
-          if (!member) {
+          if (!access.allowed) {
             throw new Error(
-              "Seu usuário não possui permissão na planilha de membros."
+              access.message ||
+                "Seu usuário não possui permissão para acessar a OceanList."
             );
           }
 
-          allowAccess(member);
-          showToast("", "success", `Bem-vindo, ${member.nick}`);
+          const user = {
+            nick: access.nick || username,
+            role: access.role || "Acesso autorizado",
+            roles: Array.isArray(access.roles) ? access.roles.slice() : []
+          };
+
+          allowAccess(user);
+          showToast("", "success", `Bem-vindo, ${user.nick}`);
           await loadOceanList({ quiet: true });
         } catch (error) {
           denyAccess(
@@ -2722,15 +2695,6 @@
               : "Não foi possível validar seu acesso."
           );
         }
-      }
-
-      async function fetchMembers(options = {}) {
-        const url = spreadsheetExportUrl(
-          CONFIG.sheets.membersId,
-          CONFIG.sheets.membersGid,
-          "tsv"
-        );
-        return fetchViaWorker(url, options);
       }
 
       function showToast(message, type = "info", title = "") {
@@ -2884,10 +2848,8 @@
           refresh: initializeAuthentication
         }),
         sheets: Object.freeze({
-          spreadsheetExportUrl,
-          fetchMembers,
           request: requestOceanList,
-          parseTSV
+          fetchViaWorker
         })
       });
 
