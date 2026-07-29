@@ -60,6 +60,15 @@
         "TERMINO"
       ]);
       let currentUser = null;
+
+      function createPublishingResults() {
+        return {
+          listing: { status: "idle", message: "Aguardando", url: "" },
+          consultation: { status: "idle", message: "Aguardando", url: "" },
+          backup: { status: "idle", message: "Aguardando", url: "" }
+        };
+      }
+
       const appState = {
         headers: [],
         rows: [],
@@ -78,6 +87,7 @@
         savingMembers: false,
         organizingMembers: false,
         publishingBusy: false,
+        publishingResults: createPublishingResults(),
         editingSettingsRow: null,
         editingLayoutOwnerRow: null,
         loaded: false
@@ -1653,6 +1663,51 @@
         document.querySelectorAll("[data-publish-action]").forEach((button) => {
           button.disabled = appState.publishingBusy || !hasPublishingData();
         });
+
+        document.getElementById("publish-all-actions").disabled =
+          appState.publishingBusy || !hasPublishingData();
+
+        Object.entries(appState.publishingResults).forEach(([kind, result]) => {
+          const card = document.querySelector(`[data-publish-card="${kind}"]`);
+          const state = document.querySelector(`[data-publish-state="${kind}"]`);
+          const openLink = document.querySelector(`[data-publish-open="${kind}"]`);
+          if (!card || !state || !openLink) return;
+
+          card.classList.remove(
+            "is-running",
+            "is-waiting",
+            "is-success",
+            "is-error"
+          );
+          if (result.status !== "idle") {
+            card.classList.add(`is-${result.status}`);
+          }
+
+          state.textContent = result.message || "Aguardando";
+          openLink.hidden = result.status !== "success" || !result.url;
+          if (!openLink.hidden) {
+            openLink.href = result.url;
+          } else {
+            openLink.removeAttribute("href");
+          }
+        });
+      }
+
+      function resetPublishingResults() {
+        appState.publishingResults = createPublishingResults();
+      }
+
+      function setPublishingResult(kind, status, message, url = "") {
+        if (!Object.prototype.hasOwnProperty.call(appState.publishingResults, kind)) {
+          return;
+        }
+
+        appState.publishingResults[kind] = {
+          status,
+          message,
+          url
+        };
+        renderPublishingDialog();
       }
 
       function setPublishingMode(mode) {
@@ -1678,6 +1733,7 @@
         }
 
         setPublishingMode("manual");
+        resetPublishingResults();
         document.getElementById("publish-status").textContent =
           "Selecione uma ação para iniciar.";
         renderPublishingDialog();
@@ -1765,7 +1821,18 @@
         );
       }
 
-      function applyForumSubmissionOptions(body, form, options = {}) {
+      function createForumSubmissionBody(form, textarea, bbcode, options = {}) {
+        if (options.clearEditReason) {
+          form
+            .querySelectorAll('[name="edit_reason"]')
+            .forEach((control) => control.remove());
+        }
+
+        const body = new FormData(form);
+        body.set(textarea.name || "message", bbcode);
+        body.delete("preview");
+        body.set("post", "Enviar");
+
         if (options.clearEditReason) {
           body.delete("edit_reason");
         }
@@ -1779,6 +1846,8 @@
             disableHtmlControl?.value || "1"
           );
         }
+
+        return body;
       }
 
       async function submitForumPostingForm(formUrl, bbcode, options = {}) {
@@ -1793,11 +1862,7 @@
         const textarea = form.querySelector(
           'textarea[name="message"], textarea#text_editor_textarea, textarea'
         );
-        const body = new FormData(form);
-        body.set(textarea.name || "message", bbcode);
-        body.delete("preview");
-        body.set("post", "Enviar");
-        applyForumSubmissionOptions(body, form, options);
+        const body = createForumSubmissionBody(form, textarea, bbcode, options);
 
         const action = new URL(
           form.getAttribute("action") || "/post",
@@ -1863,13 +1928,19 @@
         });
       }
 
-      function waitForPublishingDelay(label) {
+      function waitForPublishingDelay(action) {
         const seconds = Math.ceil(CONFIG.forum.automaticDelayMs / 1000);
         const status = document.getElementById("publish-status");
 
         return new Promise((resolve) => {
           let remaining = seconds;
-          status.textContent = `${label} em ${remaining}s…`;
+          status.textContent = `${action.label} em ${remaining}s…`;
+          setPublishingResult(
+            action.kind,
+            "waiting",
+            `Em ${remaining} s`,
+            ""
+          );
           const timer = window.setInterval(() => {
             remaining -= 1;
             if (remaining <= 0) {
@@ -1877,7 +1948,13 @@
               resolve();
               return;
             }
-            status.textContent = `${label} em ${remaining}s…`;
+            status.textContent = `${action.label} em ${remaining}s…`;
+            setPublishingResult(
+              action.kind,
+              "waiting",
+              `Em ${remaining} s`,
+              ""
+            );
           }, 1000);
         });
       }
@@ -1940,12 +2017,11 @@
         });
       }
 
-      async function runAutomaticPublishing(kind) {
-        if (appState.publishingBusy || !hasPublishingData()) return;
-
+      function automaticPublishingActions() {
         const publishing = appState.publishing;
-        const actions = {
+        return {
           listing: {
+            kind: "listing",
             label: "Atualização da listagem",
             bridgeAction: "edit",
             topicId: requireTopicId(
@@ -1955,6 +2031,7 @@
             bbcode: publishingText("listing")
           },
           consultation: {
+            kind: "consultation",
             label: "Atualização da consulta",
             bridgeAction: "edit",
             topicId: requireTopicId(
@@ -1964,22 +2041,23 @@
             bbcode: publishingText("consultation")
           },
           backup: {
+            kind: "backup",
             label: "Publicação do backup",
             bridgeAction: "reply",
             topicId: requireTopicId(publishing.backupTopicId, "R2"),
             bbcode: publishingText("backup")
           }
         };
-        const action = actions[kind];
-        if (!action) return;
+      }
 
+      function createPublishingTransport(action, windowName) {
         const sameForumOrigin =
           window.location.origin === CONFIG.forum.origin;
         const popup = sameForumOrigin
           ? null
           : window.open(
               forumTopicUrl(action.topicId),
-              `oceanlist-forum-${action.topicId}`
+              windowName
             );
 
         if (!sameForumOrigin && !popup) {
@@ -1987,34 +2065,100 @@
             "Permita a abertura da janela do fórum para continuar.",
             "warning"
           );
-          return;
+          return null;
         }
 
-        appState.publishingBusy = true;
-        updateMemberEditControls();
-        renderPublishingDialog();
+        return { sameForumOrigin, popup };
+      }
+
+      function normalizeForumResultUrl(value, topicId) {
+        try {
+          const resultUrl = new URL(
+            value || forumTopicUrl(topicId),
+            CONFIG.forum.origin
+          );
+          if (resultUrl.origin === CONFIG.forum.origin) {
+            return resultUrl.toString();
+          }
+        } catch {
+          // Usa a URL segura do tópico como fallback.
+        }
+
+        return forumTopicUrl(topicId);
+      }
+
+      async function executeAutomaticPublishingAction(action, transport) {
+        document.getElementById("publish-status").textContent =
+          `${action.label}: enviando…`;
+        setPublishingResult(action.kind, "running", "Enviando…", "");
 
         try {
-          await waitForPublishingDelay(action.label);
-          document.getElementById("publish-status").textContent =
-            `${action.label}: enviando…`;
-
-          if (sameForumOrigin) {
-            if (action.bridgeAction === "edit") {
-              await editForumTopic(action.topicId, action.bbcode);
-            } else {
-              await replyForumTopic(action.topicId, action.bbcode);
-            }
+          let resultUrl;
+          if (transport.sameForumOrigin) {
+            resultUrl =
+              action.bridgeAction === "edit"
+                ? await editForumTopic(action.topicId, action.bbcode)
+                : await replyForumTopic(action.topicId, action.bbcode);
           } else {
-            await publishThroughForumBridge(popup, {
+            const result = await publishThroughForumBridge(transport.popup, {
               type: "OCEANLIST_FORUM_ACTION",
               requestId: createPublishingRequestId(),
               action: action.bridgeAction,
               topicId: action.topicId,
               bbcode: action.bbcode
             });
+            resultUrl = result.url;
           }
 
+          const safeUrl = normalizeForumResultUrl(resultUrl, action.topicId);
+          setPublishingResult(
+            action.kind,
+            "success",
+            "Concluído",
+            safeUrl
+          );
+          return safeUrl;
+        } catch (error) {
+          setPublishingResult(
+            action.kind,
+            "error",
+            "Falhou",
+            ""
+          );
+          throw error;
+        }
+      }
+
+      function beginPublishing() {
+        appState.publishingBusy = true;
+        updateMemberEditControls();
+        renderPublishingDialog();
+      }
+
+      function finishPublishing() {
+        appState.publishingBusy = false;
+        updateMemberEditControls();
+        renderPublishingDialog();
+      }
+
+      async function runAutomaticPublishing(kind) {
+        if (appState.publishingBusy || !hasPublishingData()) return;
+
+        const actions = automaticPublishingActions();
+        const action = actions[kind];
+        if (!action) return;
+        const transport = createPublishingTransport(
+          action,
+          `oceanlist-forum-${action.topicId}`
+        );
+        if (!transport) return;
+
+        setPublishingResult(kind, "idle", "Aguardando", "");
+        beginPublishing();
+
+        try {
+          await waitForPublishingDelay(action);
+          await executeAutomaticPublishingAction(action, transport);
           document.getElementById("publish-status").textContent =
             `${action.label} concluída.`;
           showToast(`${action.label} concluída no fórum.`, "success");
@@ -2022,9 +2166,48 @@
           document.getElementById("publish-status").textContent = error.message;
           showToast(error.message, "error");
         } finally {
-          appState.publishingBusy = false;
-          updateMemberEditControls();
-          renderPublishingDialog();
+          finishPublishing();
+        }
+      }
+
+      async function runAutomaticPublishingSequence() {
+        if (appState.publishingBusy || !hasPublishingData()) return;
+
+        const actions = automaticPublishingActions();
+        const sequence = [
+          actions.listing,
+          actions.consultation,
+          actions.backup
+        ];
+        const transport = createPublishingTransport(
+          sequence[0],
+          "oceanlist-forum-sequence"
+        );
+        if (!transport) return;
+
+        resetPublishingResults();
+        beginPublishing();
+
+        try {
+          for (let index = 0; index < sequence.length; index += 1) {
+            const action = sequence[index];
+            if (index > 0) {
+              await waitForPublishingDelay(action);
+            }
+            await executeAutomaticPublishingAction(action, transport);
+          }
+
+          document.getElementById("publish-status").textContent =
+            "Atualização completa concluída.";
+          showToast(
+            "Listagem, consulta e backup atualizados no fórum.",
+            "success"
+          );
+        } catch (error) {
+          document.getElementById("publish-status").textContent = error.message;
+          showToast(error.message, "error");
+        } finally {
+          finishPublishing();
         }
       }
 
@@ -2752,6 +2935,14 @@
               (error) => showToast(error.message, "error")
             );
           });
+        });
+
+      document
+        .getElementById("publish-all-actions")
+        .addEventListener("click", () => {
+          runAutomaticPublishingSequence().catch((error) =>
+            showToast(error.message, "error")
+          );
         });
 
       document
